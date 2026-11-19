@@ -56,12 +56,10 @@ def color_score(color1, color2):
     return 1
 
 
-# ---------- Page Design ----------
+# ---------- Page Navigation ----------
 
 st.title("👗 Smart Wardrobe")
-st.caption("Your personal digital closet and outfit assistant")
-
-st.sidebar.title("My Closet")
+st.caption("Your Personal Digital Closet & Outfit Assistant")
 
 page = st.sidebar.radio(
     "Navigation",
@@ -69,6 +67,7 @@ page = st.sidebar.radio(
         "My Wardrobe",
         "Add Clothing",
         "Smart Outfit",
+        "Weather Recommendation"
     ]
 )
 
@@ -83,7 +82,6 @@ st.sidebar.metric(
 if page == "My Wardrobe":
 
     st.header("✨ My Wardrobe")
-    st.write("Your clothes, organized in one place.")
 
     if not st.session_state.clothes:
         st.info("Your wardrobe is empty. Add your first clothing item!")
@@ -97,17 +95,17 @@ if page == "My Wardrobe":
 
                 with st.container(border=True):
 
-                    image_data = item.get("image")
-
-                    if image_data:
-                        image_bytes = base64.b64decode(image_data)
-                        st.image(image_bytes, use_container_width=True)
+                    if item.get("image"):
+                        st.image(
+                            base64.b64decode(item["image"]),
+                            use_container_width=True
+                        )
                     else:
                         st.write("👕 No photo uploaded")
 
                     st.subheader(item["name"])
-                    st.write(f"Type: {item['type']}")
-                    st.write(f"Color: {item['color']}")
+                    st.write("Type:", item["type"])
+                    st.write("Color:", item["color"])
 
                     if st.button("Delete", key=f"delete_{index}"):
                         st.session_state.clothes.pop(index)
@@ -120,7 +118,6 @@ if page == "My Wardrobe":
 elif page == "Add Clothing":
 
     st.header("➕ Add New Clothing")
-    st.write("Build your digital wardrobe.")
 
     with st.form("add_clothing_form"):
 
@@ -134,6 +131,11 @@ elif page == "Add Clothing":
         color = st.selectbox(
             "Clothing color",
             ["Black", "White", "Blue", "Red", "Grey", "Beige", "Other"]
+        )
+
+        warmth = st.selectbox(
+            "Warmth level",
+            ["Light", "Medium", "Warm"]
         )
 
         uploaded_file = st.file_uploader(
@@ -152,7 +154,7 @@ elif page == "Add Clothing":
 
                 image_data = None
 
-                if uploaded_file is not None:
+                if uploaded_file:
                     image_data = base64.b64encode(
                         uploaded_file.getvalue()
                     ).decode("utf-8")
@@ -161,11 +163,11 @@ elif page == "Add Clothing":
                     "name": name.strip(),
                     "type": clothing_type,
                     "color": color,
+                    "warmth": warmth,
                     "image": image_data
                 }
 
                 st.session_state.clothes.append(new_item)
-
                 save_data(st.session_state.clothes)
 
                 st.success("Clothing added successfully!")
@@ -177,7 +179,6 @@ elif page == "Add Clothing":
 elif page == "Smart Outfit":
 
     st.header("✨ Smart Outfit Recommendation")
-    st.write("Find a coordinated outfit from your wardrobe.")
 
     tops = [
         x for x in st.session_state.clothes
@@ -216,12 +217,12 @@ elif page == "Smart Outfit":
 
             best_score = max(x[0] for x in combinations)
 
-            best_combinations = [
+            best = [
                 x for x in combinations
                 if x[0] == best_score
             ]
 
-            _, top, bottom, shoe = random.choice(best_combinations)
+            _, top, bottom, shoe = random.choice(best)
 
             st.success("Your outfit is ready!")
 
@@ -248,12 +249,80 @@ elif page == "Smart Outfit":
                         st.write(item["name"])
                         st.caption(item["color"])
 
-            st.caption(
-                f"Color coordination score: {best_score}/9"
-            )
+            st.caption(f"Color coordination score: {best_score}/9")
 
         else:
-
             st.warning(
                 "Please add at least one top, bottom, and pair of shoes."
             )
+
+
+# ---------- Weather Recommendation ----------
+
+elif page == "Weather Recommendation":
+
+    st.header("🌤️ Weather Outfit Assistant")
+
+    temperature = st.slider(
+        "Today's temperature (°C)",
+        min_value=-10,
+        max_value=40,
+        value=22
+    )
+
+    weather = st.selectbox(
+        "Today's weather",
+        ["Sunny", "Cloudy", "Rainy", "Snowy", "Windy"]
+    )
+
+    if temperature < 10:
+        warmth_needed = "Warm"
+        st.info("🥶 Cold weather! Choose warm clothing.")
+
+    elif temperature < 20:
+        warmth_needed = "Medium"
+        st.info("🧥 Cool weather! A light jacket is recommended.")
+
+    else:
+        warmth_needed = "Light"
+        st.info("☀️ Warm weather! Choose light and breathable clothing.")
+
+    if weather == "Rainy":
+        st.warning("🌧️ Remember to bring an umbrella!")
+
+    elif weather == "Snowy":
+        st.warning("❄️ Wear warm layers and suitable shoes!")
+
+    elif weather == "Windy":
+        st.warning("💨 Consider wearing a windproof jacket!")
+
+    st.subheader("Your Weather Outfit")
+
+    suitable = [
+        item for item in st.session_state.clothes
+        if item.get("warmth", "Medium") == warmth_needed
+    ]
+
+    if suitable:
+
+        for item in suitable:
+
+            with st.container(border=True):
+
+                if item.get("image"):
+                    st.image(
+                        base64.b64decode(item["image"]),
+                        width=150
+                    )
+
+                st.write(f"**{item['name']}**")
+                st.write(f"{item['type']} | {item['color']}")
+
+    else:
+        st.info(
+            "No clothing with the recommended warmth level. "
+            "Try adding more clothes to your wardrobe!"
+        )
+
+st.sidebar.divider()
+st.sidebar.caption("Smart Wardrobe 3.0 | Built with Python")
