@@ -4,6 +4,9 @@ import json
 import os
 import random
 import base64
+import requests
+
+from streamlit_geolocation import streamlit_geolocation
 
 DATA_FILE = "wardrobe_data.json"
 
@@ -18,26 +21,29 @@ st.set_page_config(
 def load_data():
     if os.path.exists(DATA_FILE):
         try:
-            with open(DATA_FILE, "r", encoding="utf-8") as file:
-                return json.load(file)
+            with open(DATA_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
         except (json.JSONDecodeError, OSError):
             return []
     return []
 
 
 def save_data(clothes):
-    with open(DATA_FILE, "w", encoding="utf-8") as file:
-        json.dump(clothes, file, ensure_ascii=False, indent=4)
+    with open(DATA_FILE, "w", encoding="utf-8") as f:
+        json.dump(clothes, f, ensure_ascii=False, indent=4)
 
 
 if "clothes" not in st.session_state:
     st.session_state.clothes = load_data()
 
+if "weather_coords" not in st.session_state:
+    st.session_state.weather_coords = None
+
 
 # ---------- Color Matching ----------
 
-def color_score(color1, color2):
-    compatible_colors = {
+def color_score(c1, c2):
+    compatible = {
         "Black": ["White", "Grey", "Beige", "Blue", "Red"],
         "White": ["Black", "Blue", "Grey", "Beige", "Red"],
         "Blue": ["White", "Black", "Beige", "Grey"],
@@ -47,16 +53,144 @@ def color_score(color1, color2):
         "Other": ["Black", "White", "Grey"]
     }
 
-    if color1 == color2:
+    if c1 == c2:
         return 2
 
-    if color2 in compatible_colors.get(color1, []):
+    if c2 in compatible.get(c1, []):
         return 3
 
     return 1
 
 
-# ---------- Page Navigation ----------
+# ---------- Weather Functions ----------
+
+def get_weather(latitude, longitude):
+    url = "https://api.open-meteo.com/v1/forecast"
+
+    params = {
+        "latitude": latitude,
+        "longitude": longitude,
+        "current": (
+            "temperature_2m,apparent_temperature,"
+            "relative_humidity_2m,weather_code,"
+            "precipitation,wind_speed_10m"
+        ),
+        "timezone": "auto"
+    }
+
+    response = requests.get(url, params=params, timeout=15)
+    response.raise_for_status()
+
+    return response.json()["current"]
+
+
+def get_city_name(latitude, longitude):
+    url = "https://nominatim.openstreetmap.org/reverse"
+
+    headers = {
+        "User-Agent": "SmartWardrobeStudentProject/1.0"
+    }
+
+    params = {
+        "lat": latitude,
+        "lon": longitude,
+        "format": "jsonv2",
+        "zoom": 10
+    }
+
+    response = requests.get(
+        url,
+        params=params,
+        headers=headers,
+        timeout=15
+    )
+
+    response.raise_for_status()
+
+    address = response.json().get("address", {})
+
+    return (
+        address.get("city")
+        or address.get("town")
+        or address.get("village")
+        or address.get("county")
+        or "Your current area"
+    )
+
+
+def find_city(city):
+    url = "https://geocoding-api.open-meteo.com/v1/search"
+
+    params = {
+        "name": city,
+        "count": 1,
+        "language": "en",
+        "format": "json"
+    }
+
+    response = requests.get(url, params=params, timeout=15)
+    response.raise_for_status()
+
+    results = response.json().get("results", [])
+
+    if not results:
+        return None
+
+    place = results[0]
+
+    return {
+        "latitude": place["latitude"],
+        "longitude": place["longitude"],
+        "name": place["name"]
+    }
+
+
+def weather_description(code):
+    if code == 0:
+        return "Clear sky ☀️"
+    elif code in [1, 2, 3]:
+        return "Partly cloudy ⛅"
+    elif code in [45, 48]:
+        return "Foggy 🌫️"
+    elif code in [51, 53, 55, 56, 57]:
+        return "Drizzle 🌦️"
+    elif code in [61, 63, 65, 66, 67, 80, 81, 82]:
+        return "Rainy 🌧️"
+    elif code in [71, 73, 75, 77, 85, 86]:
+        return "Snowy ❄️"
+    elif code in [95, 96, 99]:
+        return "Thunderstorm ⛈️"
+
+    return "Unknown weather"
+
+
+def show_weather(latitude, longitude, city):
+    try:
+        weather = get_weather(latitude, longitude)
+
+        temperature = weather["temperature_2m"]
+        feels_like = weather["apparent_temperature"]
+        description = weather_description(weather["weather_code"])
+
+        st.subheader("📍 Current Location")
+        st.write(city)
+
+        col1, col2, col3 = st.columns(3)
+
+        col1.metric("Temperature", f"{temperature} °C")
+        col2.metric("Feels Like", f"{feels_like} °C")
+        col3.metric("Wind Speed", f"{weather['wind_speed_10m']} km/h")
+
+        st.info(f"Current weather: {description}")
+
+        return temperature, weather["weather_code"]
+
+    except requests.RequestException:
+        st.error("Unable to get weather. Please try again.")
+        return None, None
+
+
+# ---------- Navigation ----------
 
 st.title("👗 Smart Wardrobe")
 st.caption("Your Personal Digital Closet & Outfit Assistant")
@@ -67,7 +201,7 @@ page = st.sidebar.radio(
         "My Wardrobe",
         "Add Clothing",
         "Smart Outfit",
-        "Weather Recommendation"
+        "Weather & Location"
     ]
 )
 
@@ -84,7 +218,7 @@ if page == "My Wardrobe":
     st.header("✨ My Wardrobe")
 
     if not st.session_state.clothes:
-        st.info("Your wardrobe is empty. Add your first clothing item!")
+        st.info("Your wardrobe is empty. Add your first item!")
 
     else:
         cols = st.columns(3)
@@ -92,7 +226,6 @@ if page == "My Wardrobe":
         for index, item in enumerate(st.session_state.clothes):
 
             with cols[index % 3]:
-
                 with st.container(border=True):
 
                     if item.get("image"):
@@ -106,6 +239,7 @@ if page == "My Wardrobe":
                     st.subheader(item["name"])
                     st.write("Type:", item["type"])
                     st.write("Color:", item["color"])
+                    st.write("Warmth:", item.get("warmth", "Medium"))
 
                     if st.button("Delete", key=f"delete_{index}"):
                         st.session_state.clothes.pop(index)
@@ -159,15 +293,14 @@ elif page == "Add Clothing":
                         uploaded_file.getvalue()
                     ).decode("utf-8")
 
-                new_item = {
+                st.session_state.clothes.append({
                     "name": name.strip(),
                     "type": clothing_type,
                     "color": color,
                     "warmth": warmth,
                     "image": image_data
-                }
+                })
 
-                st.session_state.clothes.append(new_item)
                 save_data(st.session_state.clothes)
 
                 st.success("Clothing added successfully!")
@@ -226,16 +359,13 @@ elif page == "Smart Outfit":
 
             st.success("Your outfit is ready!")
 
-            cols = st.columns(3)
-
             for col, item, label in zip(
-                cols,
+                st.columns(3),
                 [top, bottom, shoe],
                 ["👕 Top", "👖 Bottom", "👟 Shoes"]
             ):
 
                 with col:
-
                     with st.container(border=True):
 
                         st.subheader(label)
@@ -257,72 +387,149 @@ elif page == "Smart Outfit":
             )
 
 
-# ---------- Weather Recommendation ----------
+# ---------- Weather & Location ----------
 
-elif page == "Weather Recommendation":
+elif page == "Weather & Location":
 
-    st.header("🌤️ Weather Outfit Assistant")
+    st.header("🌍 Weather & Location Assistant")
 
-    temperature = st.slider(
-        "Today's temperature (°C)",
-        min_value=-10,
-        max_value=40,
-        value=22
+    st.write(
+        "Allow location access to get weather near you automatically."
     )
 
-    weather = st.selectbox(
-        "Today's weather",
-        ["Sunny", "Cloudy", "Rainy", "Snowy", "Windy"]
-    )
+    location = streamlit_geolocation()
 
-    if temperature < 10:
-        warmth_needed = "Warm"
-        st.info("🥶 Cold weather! Choose warm clothing.")
+    if isinstance(location, dict):
 
-    elif temperature < 20:
-        warmth_needed = "Medium"
-        st.info("🧥 Cool weather! A light jacket is recommended.")
+        latitude = location.get("latitude")
+        longitude = location.get("longitude")
 
-    else:
-        warmth_needed = "Light"
-        st.info("☀️ Warm weather! Choose light and breathable clothing.")
+        if latitude is not None and longitude is not None:
 
-    if weather == "Rainy":
-        st.warning("🌧️ Remember to bring an umbrella!")
+            st.session_state.weather_coords = {
+                "latitude": latitude,
+                "longitude": longitude
+            }
 
-    elif weather == "Snowy":
-        st.warning("❄️ Wear warm layers and suitable shoes!")
+    coords = st.session_state.weather_coords
 
-    elif weather == "Windy":
-        st.warning("💨 Consider wearing a windproof jacket!")
+    if coords:
 
-    st.subheader("Your Weather Outfit")
+        try:
+            city = get_city_name(
+                coords["latitude"],
+                coords["longitude"]
+            )
 
-    suitable = [
-        item for item in st.session_state.clothes
-        if item.get("warmth", "Medium") == warmth_needed
-    ]
+            temperature, code = show_weather(
+                coords["latitude"],
+                coords["longitude"],
+                city
+            )
 
-    if suitable:
-
-        for item in suitable:
-
-            with st.container(border=True):
-
-                if item.get("image"):
-                    st.image(
-                        base64.b64decode(item["image"]),
-                        width=150
-                    )
-
-                st.write(f"**{item['name']}**")
-                st.write(f"{item['type']} | {item['color']}")
+        except requests.RequestException:
+            st.warning(
+                "Could not identify your area. "
+                "You can search for a city below."
+            )
+            temperature = None
+            code = None
 
     else:
         st.info(
-            "No clothing with the recommended warmth level. "
-            "Try adding more clothes to your wardrobe!"
+            "Location not available yet. "
+            "Please allow location permission or search manually."
+        )
+        temperature = None
+        code = None
+
+    st.divider()
+
+    st.subheader("🔎 Search Another City")
+
+    with st.form("city_search"):
+
+        city_input = st.text_input(
+            "Enter city name",
+            placeholder="For example: New York"
         )
 
+        search = st.form_submit_button("Get City Weather")
+
+        if search:
+
+            if city_input.strip():
+
+                try:
+                    place = find_city(city_input.strip())
+
+                    if place:
+                        st.session_state.weather_coords = {
+                            "latitude": place["latitude"],
+                            "longitude": place["longitude"]
+                        }
+
+                        st.rerun()
+
+                    else:
+                        st.error("City not found. Try another name.")
+
+                except requests.RequestException:
+                    st.error("Unable to search for this city.")
+
+    # Weather outfit suggestions
+
+    if coords and temperature is not None:
+
+        st.divider()
+        st.subheader("👗 Weather Outfit Suggestions")
+
+        if temperature < 10:
+            warmth_needed = "Warm"
+            st.info("Cold weather: Choose warm clothes and a coat.")
+
+        elif temperature < 20:
+            warmth_needed = "Medium"
+            st.info("Cool weather: Choose medium-weight clothing.")
+
+        else:
+            warmth_needed = "Light"
+            st.info("Warm weather: Choose light and breathable clothing.")
+
+        if code in [51, 53, 55, 61, 63, 65, 80, 81, 82]:
+            st.warning("🌧️ Rain is possible. Remember an umbrella!")
+
+        elif code in [71, 73, 75, 77, 85, 86]:
+            st.warning("❄️ Snowy weather. Wear warm layers!")
+
+        suitable = [
+            item for item in st.session_state.clothes
+            if item.get("warmth", "Medium") == warmth_needed
+        ]
+
+        if suitable:
+
+            for item in suitable:
+
+                with st.container(border=True):
+
+                    st.write(f"**{item['name']}**")
+                    st.write(
+                        f"{item['type']} | {item['color']} | "
+                        f"{item.get('warmth', 'Medium')}"
+                    )
+
+                    if item.get("image"):
+                        st.image(
+                            base64.b64decode(item["image"]),
+                            width=140
+                        )
+
+        else:
+            st.info(
+                "No matching clothes found. "
+                "Add more clothes with this warmth level."
+            )
+
 st.sidebar.divider()
-st.sidebar.caption("Smart Wardrobe 3.0 | Built with Python")
+st.sidebar.caption("Smart Wardrobe 4.0")
