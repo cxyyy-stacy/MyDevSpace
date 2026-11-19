@@ -1,0 +1,107 @@
+
+expenses = []
+
+# Automatically classify expenses
+def classify_expense(name):
+    name = name.lower()
+
+    categories = {
+        "Food": ["starbucks", "mcdonald", "restaurant", "coffee", "food"],
+        "Transport": ["uber", "taxi", "bus", "train", "subway"],
+        "Shopping": ["amazon", "clothes", "shoes", "shopping"],
+        "Entertainment": ["netflix", "movie", "game", "music"]
+    }
+
+    for category, keywords in categories.items():
+        for keyword in keywords:
+            if keyword in name:
+                return category
+
+    return "Other"
+
+
+# Add a new expense
+def add_expense():
+    name = input("What did you buy? ")
+
+    try:
+        amount = float(input("How much did it cost? "))
+        if amount <= 0:
+            print("Amount must be greater than 0.")
+            return
+    except ValueError:
+        print("Please enter a valid amount.")
+        return
+
+    category = classify_expense(name)
+
+    expenses.append({
+        "name": name,
+        "amount": amount,
+        "category": category
+    })
+
+    print("Expense added!")
+    print("Automatic category:", category)
+
+
+# View all expenses
+def view_expenses():
+    if not expenses:
+        print("No expenses yet.")
+        return
+
+    for expense in expenses:
+        print(
+            expense["name"],
+            "$" + str(expense["amount"]),
+            expense["category"]
+        )
+
+
+# Show spending statistics
+def show_summary():
+    if not expenses:
+        print("No expenses to summarize.")
+        return
+
+    total = 0
+    category_totals = {}
+
+    for expense in expenses:
+        total += expense["amount"]
+        category = expense["category"]
+
+        category_totals[category] = (
+            category_totals.get(category, 0)
+            + expense["amount"]
+        )
+
+    print("\nTotal spending: $", round(total, 2))
+    print("\nCategory breakdown:")
+
+    for category, amount in category_totals.items():
+        print(category, ": $", round(amount, 2))
+
+
+# Main program
+while True:
+    print("\n=== Smart Expense Tracker ===")
+    print("1. Add Expense")
+    print("2. View Expenses")
+    print("3. Spending Summary")
+    print("4. Exit")
+
+    choice = input("Choose an option: ")
+
+    if choice == "1":
+        add_expense()
+    elif choice == "2":
+        view_expenses()
+    elif choice == "3":
+        show_summary()
+    elif choice == "4":
+        print("Goodbye!")
+        break
+    else:
+        print("Invalid choice.")
